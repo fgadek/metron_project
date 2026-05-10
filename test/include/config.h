@@ -1,0 +1,4 @@
+#define DEBUG 1
+
+#define COMMAND_MAX_WORD_COUNT 3
+#define COMMAND_MAX_WORD_SIZE 32
