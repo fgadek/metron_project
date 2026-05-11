@@ -1,11 +1,11 @@
 /*****************************************************************************
-* | File      	:   EPD_4in2_V2.h
+* | File      	:   EPD_4in2b_V2.h
 * | Author      :   Waveshare team
-* | Function    :   4.2inch e-paper V2
+* | Function    :   4.2inch e-paper b&c
 * | Info        :
 *----------------
 * |	This version:   V1.0
-* | Date        :   2023-09-12
+* | Date        :   2020-11-25
 * | Info        :
 * -----------------------------------------------------------------------------
 #
@@ -28,29 +28,21 @@
 # THE SOFTWARE.
 #
 ******************************************************************************/
-#ifndef _EPD_4IN2_V2_H_
-#define _EPD_4IN2_V2_H_
+#ifndef __EPD_4IN2B_V2_H_
+#define __EPD_4IN2B_V2_H_
 
 #include "DEV_Config.h"
 
 // Display resolution
-#define EPD_4IN2_V2_WIDTH       400
-#define EPD_4IN2_V2_HEIGHT      300
-
-#define Seconds_1_5S      0
-#define Seconds_1S        1
+#define EPD_4IN2B_V2_WIDTH       400
+#define EPD_4IN2B_V2_HEIGHT      300
 
 #define KEY0      15
 #define KEY1      17
 
-void EPD_4IN2_V2_Init(void);
-void EPD_4IN2_V2_Init_Fast(UBYTE Mode);
-void EPD_4IN2_V2_Init_4Gray(void);
-void EPD_4IN2_V2_Clear(void);
-void EPD_4IN2_V2_Display(UBYTE *Image);
-void EPD_4IN2_V2_Display_Fast(UBYTE *Image);
-void EPD_4IN2_V2_Display_4Gray(UBYTE *Image);
-void EPD_4IN2_V2_PartialDisplay(UBYTE *Image, UWORD Xstart, UWORD Ystart, UWORD Xend, UWORD Yend);
-void EPD_4IN2_V2_Sleep(void);
+void EPD_4IN2B_V2_Init(void);
+void EPD_4IN2B_V2_Clear(void);
+void EPD_4IN2B_V2_Display(const UBYTE *blackimage, const UBYTE *ryimage);
+void EPD_4IN2B_V2_Sleep(void);
 
 #endif

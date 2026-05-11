@@ -37,7 +37,7 @@ void setup()
 
 	while (!eth.connected()) {
 #if DEBUG == 1
-		Serial.print("not connected\n");
+		Serial.print("*not connected*\n");
 #endif
 		// led_blink() or smth
 	}
@@ -70,7 +70,9 @@ void loop()
 		
 		if (display(command_word_count, command_buffer))
 		{
-			Serial.println("display error");
+#if DEBUG == 1
+			Serial.print("*display error*\n");
+#endif
 		}
 	}
 }
