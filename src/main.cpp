@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <W5500lwIP.h>
 #include <WebSocketsServer.h>
+#include <LittleFS.h>
+#include <FS.h>
 #include <string.h>
 #include "config.h"
 
@@ -11,22 +13,34 @@ int extract_command_data();
 
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length);
 
+int parse_network_config_file();
+
 void print_network_config();
 
 Wiznet5500lwIP eth(17);
-IPAddress ip_default(192, 168, 67, 2);
-IPAddress subnet_default(255, 255, 255, 0);
-IPAddress gateway_default(192, 168, 67, 1);
+
+typedef struct Network_config
+{
+	IPAddress ip;
+	IPAddress subnet;
+	IPAddress gateway;
+	IPAddress dns1;
+	IPAddress dns2;
+	int dhcp = 0;
+} Network_config;
+
+Network_config network_config;
+
+char file_content[64]; // contents of config.txt file, parse_network_config_file() writes here while reading the file.
 
 // #==== UDP ====#
-unsigned int udp_port = 8888;
+unsigned int udp_port = UDP_PORT;
 char udp_packet_buffer[UDP_TX_PACKET_MAX_SIZE];
 WiFiUDP udp;
 // #============#
 
 // #= WebSocket =#
-WebSocketsServer webSocket = WebSocketsServer(1337);
-char msg_buf[10];
+WebSocketsServer webSocket = WebSocketsServer(WEBSOCKET_PORT);
 // #============#
 
 char command_buffer[COMMAND_MAX_WORD_COUNT][COMMAND_MAX_WORD_SIZE];
@@ -35,17 +49,40 @@ void setup()
 {
 	Serial.begin(9600);
 	while(!Serial);
+	
+	if (!LittleFS.begin())
+	{
+    	Serial.println("*an error has occurred while mounting LittleFS*");
+		while(true);
+  	}
+	
+	if (parse_network_config_file())
+	{
+    	Serial.println("*an error has occured while reading network configuration file*");
+		while(true);
+	}
 
-	eth.config(ip_default, gateway_default, subnet_default, NULL, NULL);
+	if (!network_config.dhcp)
+	{
+		eth.config(network_config.ip, network_config.gateway, network_config.subnet, network_config.dns1, network_config.dns2);
+		print_network_config();
+	}
+
 	eth.begin();
 
 	while (!eth.connected())
 	{
-		Serial.print("*not connected*\n");
+		Serial.println("*not connected*");
+		delay(1000);
 		// led_blink() or smth
 	}
 	
-	print_network_config();
+	Serial.println("*connected to nerwork*\n");
+	
+	if (network_config.dhcp)
+	{
+		print_network_config();
+	}
 	
 	udp.begin(udp_port);
 	
@@ -72,7 +109,7 @@ void loop()
 		
 		if (display(command_word_count, command_buffer))
 		{
-			Serial.print("*display error*\n");
+			Serial.println("*display error*\n");
 		}
 	}
 
@@ -101,6 +138,9 @@ void print_network_config()
 	}
 	Serial.println();
 
+	Serial.print("DHCP: ");
+	Serial.println((network_config.dhcp) ? "enabled" : "disabled");
+
 	Serial.print("IPv4: ");
 	Serial.println(eth.localIP());
 	
@@ -109,6 +149,9 @@ void print_network_config()
 
 	Serial.print("gateway: ");
 	Serial.println(eth.gatewayIP());
+
+	Serial.print("DNS: ");
+	Serial.println(eth.dnsIP());
 
 	Serial.println("#=============================#\n");
 }
@@ -146,7 +189,7 @@ int udp_server()
 		}
 		Serial.println();
 		Serial.print(udp_packet_buffer);
-		Serial.println();
+		Serial.println("\n");
 	}
 	delay(10);
 	
@@ -207,7 +250,8 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 			Serial.printf("WebSocket [%u] Connection from ", client_num);
 			Serial.println(ip.toString());
 			
-			webSocket.sendTXT(client_num, "");
+			webSocket.sendTXT(client_num, file_content);
+			Serial.printf("WebSocket [%u] text sent: %s\n", client_num);
 		}
 		break;
 
@@ -227,4 +271,40 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 		default:
 		break;
   }
+}
+
+int parse_network_config_file()
+{
+	File file = LittleFS.open("/network_config.txt", "r");
+
+  	if (!file)
+	{
+    	return -1;
+	}
+	
+	size_t bytesRead = file.readBytesUntil(EOF, file_content, sizeof(file_content) - 1);
+	file_content[bytesRead] = '\0';
+	
+	Serial.printf("\nNetwork configuration file:\n%s\n", file_content);
+	
+	IPAddress *network_config_ptr = (IPAddress*)&network_config;
+    char delimeter[] = "|";
+    char *buff;
+
+    buff = strtok(file_content, delimeter);
+
+	if (buff != NULL)
+	{
+		network_config.dhcp = atoi(buff);
+	}
+	
+    for (int i = 0; i < 5 && buff != NULL; i++)
+    {
+        buff = strtok(NULL, delimeter);
+		(network_config_ptr + i)->fromString(buff);
+    }
+	
+	file.close();
+
+	return 0;
 }
