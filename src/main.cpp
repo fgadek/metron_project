@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <W5500lwIP.h>
+#include <WebSocketsServer.h>
+#include <string.h>
 #include "config.h"
 
 extern "C" int display(int count, char command[COMMAND_MAX_WORD_COUNT][COMMAND_MAX_WORD_SIZE]);
@@ -7,12 +9,11 @@ extern "C" int display(int count, char command[COMMAND_MAX_WORD_COUNT][COMMAND_M
 int udp_server();
 int extract_command_data();
 
-#if DEBUG == 1
+void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length);
+
 void print_network_config();
-#endif
 
 Wiznet5500lwIP eth(17);
-
 IPAddress ip_default(192, 168, 67, 2);
 IPAddress subnet_default(255, 255, 255, 0);
 IPAddress gateway_default(192, 168, 67, 1);
@@ -23,41 +24,43 @@ char udp_packet_buffer[UDP_TX_PACKET_MAX_SIZE];
 WiFiUDP udp;
 // #============#
 
+// #= WebSocket =#
+WebSocketsServer webSocket = WebSocketsServer(1337);
+char msg_buf[10];
+// #============#
+
 char command_buffer[COMMAND_MAX_WORD_COUNT][COMMAND_MAX_WORD_SIZE];
 
 void setup()
 {
-#if DEBUG == 1
 	Serial.begin(9600);
 	while(!Serial);
-#endif
 
 	eth.config(ip_default, gateway_default, subnet_default, NULL, NULL);
 	eth.begin();
 
-	while (!eth.connected()) {
-#if DEBUG == 1
+	while (!eth.connected())
+	{
 		Serial.print("*not connected*\n");
-#endif
 		// led_blink() or smth
 	}
 	
-#if DEBUG == 1
 	print_network_config();
-#endif
 	
 	udp.begin(udp_port);
+	
+	webSocket.begin();
+  	webSocket.onEvent(onWebSocketEvent);
 }
 
 void loop()
 {
 	static int command_word_count;
-
+	
 	if (udp_server())
 	{
 		command_word_count = extract_command_data();
 		
-#if DEBUG == 1
 		Serial.print("Parsed command words: ");
 		Serial.println(command_word_count);
 		for (int i = 0; i < command_word_count; i++)
@@ -66,15 +69,48 @@ void loop()
 			Serial.println(command_buffer[i]);
 		}
 		Serial.println();
-#endif
 		
 		if (display(command_word_count, command_buffer))
 		{
-#if DEBUG == 1
 			Serial.print("*display error*\n");
-#endif
 		}
 	}
+
+	webSocket.loop();
+}
+
+void print_network_config()
+{
+	Serial.println("#=============================#");
+
+	Serial.print("MAC: ");
+	uint8_t *mac;
+	eth.macAddress(mac);
+	for (int i = 0; i < 6; i++)
+	{
+		if (mac[i] < 0xA)
+		{
+			Serial.print("0");
+		}
+		
+		Serial.print(mac[i], HEX);
+		if(i != 5)
+		{
+			Serial.print(":");
+		}
+	}
+	Serial.println();
+
+	Serial.print("IPv4: ");
+	Serial.println(eth.localIP());
+	
+	Serial.print("subnet: ");
+	Serial.println(eth.subnetMask());
+
+	Serial.print("gateway: ");
+	Serial.println(eth.gatewayIP());
+
+	Serial.println("#=============================#\n");
 }
 
 int udp_server()
@@ -98,8 +134,7 @@ int udp_server()
 			udp_packet_buffer[packet_size] = '\0';
 		}
 
-#if DEBUG == 1
-		Serial.print("Received packet of size ");
+		Serial.print("received packet of size ");
 		Serial.print(packet_size);
 		Serial.print(" from ");
 		IPAddress remote = udp.remoteIP();
@@ -110,10 +145,8 @@ int udp_server()
 			}
 		}
 		Serial.println();
-		Serial.println(udp_packet_buffer);
+		Serial.print(udp_packet_buffer);
 		Serial.println();
-#endif
-
 	}
 	delay(10);
 	
@@ -156,38 +189,42 @@ int extract_command_data()
 	return count;
 }
 
-#if DEBUG == 1
-void print_network_config()
+void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length)
 {
-	Serial.println("#=============================#");
-
-	Serial.print("MAC: ");
-	uint8_t *mac;
-	eth.macAddress(mac);
-	for (int i = 0; i < 6; i++)
+	switch(type)
 	{
-		if (mac[i] < 0xA)
+		// Client has disconnected
+		case WStype_DISCONNECTED:
 		{
-			Serial.print("0");
+			Serial.printf("WebSocket [%u] Disconnected!\n", client_num);
 		}
-		
-		Serial.print(mac[i], HEX);
-		if(i != 5)
+		break;
+
+		// New client has connected
+		case WStype_CONNECTED:
 		{
-			Serial.print(":");
+			IPAddress ip = webSocket.remoteIP(client_num);
+			Serial.printf("WebSocket [%u] Connection from ", client_num);
+			Serial.println(ip.toString());
+			
+			webSocket.sendTXT(client_num, "");
 		}
-	}
-	Serial.println();
+		break;
 
-	Serial.print("IPv4: ");
-	Serial.println(eth.localIP());
-	
-	Serial.print("subnet: ");
-	Serial.println(eth.subnetMask());
+		// Handle text messages from client
+		case WStype_TEXT:
+		{
+			Serial.printf("WebSocket [%u] Received text: %s\n", client_num, payload);
+		}
 
-	Serial.print("gateway: ");
-	Serial.println(eth.gatewayIP());
-
-	Serial.println("#=============================#\n");
+		// For everything else: do nothing
+		case WStype_BIN:
+		case WStype_ERROR:
+		case WStype_FRAGMENT_TEXT_START:
+		case WStype_FRAGMENT_BIN_START:
+		case WStype_FRAGMENT:
+		case WStype_FRAGMENT_FIN:
+		default:
+		break;
+  }
 }
-#endif
