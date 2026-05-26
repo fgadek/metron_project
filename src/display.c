@@ -3,7 +3,7 @@
 #include "EPD_4in2b_V2.h"
 #include "GUI_Paint.h"
 #include "fonts.h"
-#include "config.h"
+#include "command.h"
 
 int display_1(int mode, char *str1);
 int display_reset();

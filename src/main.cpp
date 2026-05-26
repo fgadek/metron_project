@@ -1,10 +1,15 @@
 #include <Arduino.h>
 #include <W5500lwIP.h>
 #include <WebSocketsServer.h>
+#include <WebServer.h>
 #include <LittleFS.h>
 #include <FS.h>
 #include <string.h>
-#include "config.h"
+#include "command.h"
+
+#define UDP_PORT 8888
+#define WEBSOCKET_PORT 1337
+#define HTTP_PORT 80
 
 extern "C" int display(int count, char command[COMMAND_MAX_WORD_COUNT][COMMAND_MAX_WORD_SIZE]);
 
@@ -13,8 +18,10 @@ int extract_command_data();
 
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length);
 
-int parse_network_config_file();
+void handleRoot();
+void handleNotFound();
 
+int parse_network_config_file();
 void print_network_config();
 
 Wiznet5500lwIP eth(17);
@@ -29,19 +36,21 @@ typedef struct Network_config
 	int dhcp = 0;
 } Network_config;
 
-Network_config network_config;
-
+Network_config network_config; // parse_network_config_file() writes here parsed config
 char file_content[64]; // contents of config.txt file, parse_network_config_file() writes here while reading the file.
 
 // #==== UDP ====#
-unsigned int udp_port = UDP_PORT;
 char udp_packet_buffer[UDP_TX_PACKET_MAX_SIZE];
 WiFiUDP udp;
-// #============#
+// #=============#
 
 // #= WebSocket =#
 WebSocketsServer webSocket = WebSocketsServer(WEBSOCKET_PORT);
-// #============#
+// #=============#
+
+// #=== HTTP ====#
+WebServer server(HTTP_PORT);
+// #=============#
 
 char command_buffer[COMMAND_MAX_WORD_COUNT][COMMAND_MAX_WORD_SIZE];
 
@@ -84,8 +93,12 @@ void setup()
 		print_network_config();
 	}
 	
-	udp.begin(udp_port);
+	udp.begin(UDP_PORT);
 	
+	server.on("/", HTTP_GET, handleRoot);
+	server.onNotFound(handleNotFound);
+	server.begin();
+
 	webSocket.begin();
   	webSocket.onEvent(onWebSocketEvent);
 }
@@ -113,47 +126,51 @@ void loop()
 		}
 	}
 
+	server.handleClient();
+
 	webSocket.loop();
 }
 
-void print_network_config()
+int parse_network_config_file()
 {
-	Serial.println("#=============================#");
+	File file;
+	size_t bytesRead;
+	char buffor[64];
 
-	Serial.print("MAC: ");
-	uint8_t *mac;
-	eth.macAddress(mac);
-	for (int i = 0; i < 6; i++)
+	file = LittleFS.open("/network_config.txt", "r");
+
+  	if (!file)
 	{
-		if (mac[i] < 0xA)
-		{
-			Serial.print("0");
-		}
-		
-		Serial.print(mac[i], HEX);
-		if(i != 5)
-		{
-			Serial.print(":");
-		}
+    	return -1;
 	}
-	Serial.println();
-
-	Serial.print("DHCP: ");
-	Serial.println((network_config.dhcp) ? "enabled" : "disabled");
-
-	Serial.print("IPv4: ");
-	Serial.println(eth.localIP());
 	
-	Serial.print("subnet: ");
-	Serial.println(eth.subnetMask());
+	bytesRead = file.readBytesUntil(EOF, buffor, sizeof(buffor) - 1);
+	buffor[bytesRead] = '\0';
+	
+	Serial.printf("\nNetwork configuration file:\n%s\n\n", buffor);
+	
+	strcpy(file_content, buffor);
+	
+	IPAddress *network_config_ptr = (IPAddress*)&network_config;
+    char delimeter[] = "|";
+    char *buff;
 
-	Serial.print("gateway: ");
-	Serial.println(eth.gatewayIP());
+    buff = strtok(buffor, delimeter);
 
-	Serial.print("DNS: ");
-	Serial.println(eth.dnsIP());
+	if (buff != NULL)
+	{
+		network_config.dhcp = atoi(buff);
+	}
+	
+    for (int i = 0; i < 5 && buff != NULL; i++)
+    {
+        buff = strtok(NULL, delimeter);
+		(network_config_ptr + i)->fromString(buff);
+    }
+	
+	file.close();
 
-	Serial.println("#=============================#\n");
+	return 0;
 }
 
 int udp_server()
@@ -232,6 +249,29 @@ int extract_command_data()
 	return count;
 }
 
+void handleRoot()
+{
+	Serial.printf("HTTP request for / from %s\n", server.client().remoteIP().toString().c_str());
+	File file = LittleFS.open("/index.html", "r");
+	if (file)
+	{
+		server.streamFile(file, "text/html");
+		file.close();
+	}
+	else
+	{
+		server.send(500, "text/plain", "500: Internal Server Error (Missing index.html)");
+		Serial.printf("*index.html not found in the filesystem*");
+	}
+}
+
+void handleNotFound()
+{
+	char message[] = "404 Not Found\n\n";
+	server.send(404, "text/plain", message);
+	Serial.printf("HTTP request for %s (404) from %s\n", server.uri(), server.client().remoteIP().toString().c_str());
+}
+
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length)
 {
 	switch(type)
@@ -250,8 +290,8 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 			Serial.printf("WebSocket [%u] Connection from ", client_num);
 			Serial.println(ip.toString());
 			
-			webSocket.sendTXT(client_num, file_content);
-			Serial.printf("WebSocket [%u] text sent: %s\n", client_num);
+			webSocket.sendTXT(client_num, file_content, strlen(file_content));
+			Serial.printf("WebSocket [%u] text sent: %s\n", client_num, file_content);
 		}
 		break;
 
@@ -273,38 +313,42 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
   }
 }
 
-int parse_network_config_file()
+void print_network_config()
 {
-	File file = LittleFS.open("/network_config.txt", "r");
+	Serial.println("#=============================#");
 
-  	if (!file)
+	Serial.print("MAC: ");
+	uint8_t *mac;
+	eth.macAddress(mac);
+	for (int i = 0; i < 6; i++)
 	{
-    	return -1;
+		if (mac[i] < 0xA)
+		{
+			Serial.print("0");
+		}
+		
+		Serial.print(mac[i], HEX);
+		if(i != 5)
+		{
+			Serial.print(":");
+		}
 	}
-	
-	size_t bytesRead = file.readBytesUntil(EOF, file_content, sizeof(file_content) - 1);
-	file_content[bytesRead] = '\0';
-	
-	Serial.printf("\nNetwork configuration file:\n%s\n", file_content);
-	
-	IPAddress *network_config_ptr = (IPAddress*)&network_config;
-    char delimeter[] = "|";
-    char *buff;
+	Serial.println();
 
-    buff = strtok(file_content, delimeter);
+	Serial.print("DHCP: ");
+	Serial.println((network_config.dhcp) ? "enabled" : "disabled");
 
-	if (buff != NULL)
-	{
-		network_config.dhcp = atoi(buff);
-	}
+	Serial.print("IPv4: ");
+	Serial.println(eth.localIP());
 	
-    for (int i = 0; i < 5 && buff != NULL; i++)
-    {
-        buff = strtok(NULL, delimeter);
-		(network_config_ptr + i)->fromString(buff);
-    }
-	
-	file.close();
+	Serial.print("subnet: ");
+	Serial.println(eth.subnetMask());
 
-	return 0;
+	Serial.print("gateway: ");
+	Serial.println(eth.gatewayIP());
+
+	Serial.print("DNS: ");
+	Serial.println(eth.dnsIP());
+
+	Serial.println("#=============================#\n");
 }

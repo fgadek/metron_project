@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Control</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            line-height: 1.5;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            flex-grow: 1;
+            padding: 12px;
+            font-size: 18px;
+            border: 1px solid #ccc;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 18px;
+            cursor: pointer;
+            background-color: #eee;
+            border: 1px solid #ccc;
+        }
+        button:active {
+            background-color: #ddd;
+        }
+        #messages {
+            border: 1px solid #ccc;
+            padding: 15px;
+            min-height: 100px;
+        }
+        .message {
+            margin: 0 0 10px 0;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .status {
+            font-size: 14px;
+            margin-top: 10px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket tester</h1>
+    
+    <div class="controls">
+        <input type="text" id="messageInput" placeholder="Enter message..." autofocus>
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <div id="messages"></div>
+    <div id="connectionStatus" class="status">Connecting...</div>
+
+    <script>
+        var url = "ws://" + window.location.hostname + ":1337/";
+        const socket = new WebSocket(url);
+        const messagesDiv = document.getElementById('messages');
+        const statusDiv = document.getElementById('connectionStatus');
+        const input = document.getElementById('messageInput');
+
+        socket.onopen = () => {
+            statusDiv.textContent = 'Connected to ' + window.location.hostname;
+            statusDiv.style.color = 'green';
+        };
+
+        socket.onmessage = (event) => {
+            const message = document.createElement('div');
+            message.className = 'message';
+            message.textContent = event.data;
+            messagesDiv.prepend(message);
+        };
+
+        socket.onerror = () => {
+            statusDiv.textContent = 'Connection error';
+            statusDiv.style.color = 'red';
+        };
+
+        socket.onclose = () => {
+            statusDiv.textContent = 'Disconnected';
+            statusDiv.style.color = '#666';
+        };
+
+        function sendMessage() {
+            const text = input.value;
+            if (socket.readyState === WebSocket.OPEN && text.trim() !== "") {
+                socket.send(text);
+                input.value = '';
+            }
+        }
+
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
