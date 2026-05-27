@@ -37,7 +37,7 @@ typedef struct Network_config
 } Network_config;
 
 Network_config network_config; // parse_network_config_file() writes here parsed config
-char file_content[64]; // contents of config.txt file, parse_network_config_file() writes here while reading the file.
+char network_config_file_content[64]; // contents of config.txt file, parse_network_config_file() writes here while reading the file.
 
 // #==== UDP ====#
 char udp_packet_buffer[UDP_TX_PACKET_MAX_SIZE];
@@ -70,7 +70,7 @@ void setup()
     	Serial.println("*an error has occured while reading network configuration file*");
 		while(true);
 	}
-
+	
 	if (!network_config.dhcp)
 	{
 		eth.config(network_config.ip, network_config.gateway, network_config.subnet, network_config.dns1, network_config.dns2);
@@ -137,6 +137,9 @@ int parse_network_config_file()
 	size_t bytesRead;
 	char buffor[64];
 
+	char **parsed_file_content;
+	size_t count;
+
 	file = LittleFS.open("/network_config.txt", "r");
 
   	if (!file)
@@ -147,26 +150,40 @@ int parse_network_config_file()
 	bytesRead = file.readBytesUntil(EOF, buffor, sizeof(buffor) - 1);
 	buffor[bytesRead] = '\0';
 	
+	strcpy(network_config_file_content, buffor);
+	
 	Serial.printf("\nNetwork configuration file:\n%s\n\n", buffor);
 	
-	strcpy(file_content, buffor);
-	
 	IPAddress *network_config_ptr = (IPAddress*)&network_config;
-    char delimeter[] = "|";
-    char *buff;
+	const char *delimeter = "|";
+	char *buff;
+	char *working_ptr = buffor;
 
-    buff = strtok(buffor, delimeter);
+	buff = strsep(&working_ptr, delimeter);
 
-	if (buff != NULL)
+	if (buff != NULL && (!strcmp(buff, "0") || !strcmp(buff, "1")))
 	{
 		network_config.dhcp = atoi(buff);
 	}
+
+	int i = 0;
+
+	do
+	{
+		buff = strsep(&working_ptr, delimeter);
+
+		// IPAddress class method fromString() return 1 when string meets ipv4 address format
+		// and manages to assign value to given IPAddress object.
+		if ((network_config_ptr + i)->fromString(buff)) 
+		{
+			Serial.printf("%d | %s\n", i, buff);
+		}
+		
+		i++;
+
+	} while (working_ptr != NULL);
 	
-    for (int i = 0; i < 5 && buff != NULL; i++)
-    {
-        buff = strtok(NULL, delimeter);
-		(network_config_ptr + i)->fromString(buff);
-    }
+	Serial.println();
 	
 	file.close();
 
@@ -290,8 +307,8 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 			Serial.printf("WebSocket [%u] Connection from ", client_num);
 			Serial.println(ip.toString());
 			
-			webSocket.sendTXT(client_num, file_content, strlen(file_content));
-			Serial.printf("WebSocket [%u] text sent: %s\n", client_num, file_content);
+			webSocket.sendTXT(client_num, network_config_file_content, strlen(network_config_file_content));
+			Serial.printf("WebSocket [%u] text sent: %s\n", client_num, network_config_file_content);
 		}
 		break;
 
@@ -341,14 +358,18 @@ void print_network_config()
 	Serial.print("IPv4: ");
 	Serial.println(eth.localIP());
 	
-	Serial.print("subnet: ");
+	Serial.print("Subnet: ");
 	Serial.println(eth.subnetMask());
 
-	Serial.print("gateway: ");
+	Serial.print("Gateway: ");
 	Serial.println(eth.gatewayIP());
 
-	Serial.print("DNS: ");
-	Serial.println(eth.dnsIP());
+	Serial.print("DNS_1: ");
+	Serial.println(eth.dnsIP(0));
+
+	Serial.print("DNS_2: ");
+	Serial.println(eth.dnsIP(1));
 
 	Serial.println("#=============================#\n");
 }
+
