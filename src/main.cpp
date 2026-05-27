@@ -17,11 +17,13 @@ int udp_server();
 int extract_command_data();
 
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length);
+void send_current_network_config(uint8_t client_num);
 
 void handleRoot();
 void handleNotFound();
 
 int parse_network_config_file();
+
 void print_network_config();
 
 Wiznet5500lwIP eth(17);
@@ -307,8 +309,7 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 			Serial.printf("WebSocket [%u] Connection from ", client_num);
 			Serial.println(ip.toString());
 			
-			webSocket.sendTXT(client_num, network_config_file_content, strlen(network_config_file_content));
-			Serial.printf("WebSocket [%u] text sent: %s\n", client_num, network_config_file_content);
+			send_current_network_config(client_num);
 		}
 		break;
 
@@ -328,6 +329,68 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 		default:
 		break;
   }
+}
+
+void send_current_network_config(uint8_t client_num)
+{
+	char buffor[64];
+
+	if (network_config.dhcp == 0)
+	{
+		buffor[0] = '0';
+		buffor[1] = '|';
+		buffor[3] = '\0';
+	}
+	else if (network_config.dhcp == 1)
+	{
+		buffor[0] = '1';
+		buffor[1] = '|';
+		buffor[3] = '\0';
+		
+	}
+
+	if (strcmp(eth.localIP().toString().c_str(), "(IP unset)"))
+	{
+		strcat(buffor, eth.localIP().toString().c_str());
+	}
+	
+	strcat(buffor, "|");
+
+	if (strcmp(eth.subnetMask().toString().c_str(), "(IP unset)"))
+	{
+		strcat(buffor, eth.subnetMask().toString().c_str());
+	}
+	
+	strcat(buffor, "|");
+
+	if (strcmp(eth.gatewayIP().toString().c_str(), "(IP unset)"))
+	{
+		strcat(buffor, eth.gatewayIP().toString().c_str());
+	}
+	
+	strcat(buffor, "|");
+
+	if (strcmp(eth.dnsIP(0).toString().c_str(), "(IP unset)"))
+	{
+		strcat(buffor, eth.dnsIP(0).toString().c_str());
+	}
+	
+	strcat(buffor, "|");
+
+	if (strcmp(eth.dnsIP(1).toString().c_str(), "(IP unset)"))
+	{
+		strcat(buffor, eth.dnsIP(1).toString().c_str());
+	}
+	
+	strcat(buffor, "|");
+
+	webSocket.sendTXT(client_num, buffor, strlen(buffor));
+	Serial.printf("WebSocket [%u] text sent: %s\n", client_num, buffor);
+}
+
+int check_config_format(uint8_t *config)
+{
+	//
 }
 
 void print_network_config()
