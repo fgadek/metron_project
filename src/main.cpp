@@ -57,6 +57,8 @@ WebServer server(HTTP_PORT);
 
 char command_buffer[COMMAND_MAX_WORD_COUNT][COMMAND_MAX_WORD_SIZE];
 
+int state = 0;
+
 void setup()
 {
 	Serial.begin(9600);
@@ -64,7 +66,7 @@ void setup()
 	
 	if (!LittleFS.begin())
 	{
-    	Serial.println("*an error has occurred while mounting LittleFS*");
+    	Serial.println("*an error has occurred while mounting LittleFS filesystem*");
 		while(true);
   	}
 	
@@ -79,18 +81,30 @@ void setup()
 		eth.config(network_config.ip, network_config.gateway, network_config.subnet, network_config.dns1, network_config.dns2);
 		print_network_config();
 	}
+	else
+	{
+		Serial.println("*DHCP enabled*");
+		Serial.println("Waiting for DHCP server response...");
+	}
 
 	eth.begin();
 
+	int i = 0;
 	while (!eth.connected())
 	{
-		Serial.println("*not connected*");
-		delay(1000);
-		// led_blink() or smth
+		if (i == 6)
+		{
+			Serial.println("*not connected*");
+			i = 0;
+		}
+		i++;
+		
+		delay(100);
 	}
 	
-	Serial.println("*connected to nerwork*\n");
-	
+	Serial.println("*connected to nerwork*");
+	state = 1;
+
 	if (network_config.dhcp)
 	{
 		print_network_config();
@@ -109,29 +123,58 @@ void setup()
 void loop()
 {
 	static int command_word_count;
-	
-	if (udp_server())
+	static int i = 0;
+
+	switch (state)
 	{
-		command_word_count = extract_command_data();
-		
-		Serial.print("Parsed command words: ");
-		Serial.println(command_word_count);
-		for (int i = 0; i < command_word_count; i++)
+	case 0:
+	{
+		if (!eth.isLinked())
 		{
-			Serial.print("- ");
-			Serial.println(command_buffer[i]);
+			if (i == 8)
+			{
+				Serial.println("*connection lost*");
+				i = 0;
+			}
 		}
-		Serial.println();
-		
-		if (display(command_word_count, command_buffer))
+		else
 		{
-			Serial.println("*display error*\n");
+			Serial.println("*connected to nerwork*");
+			i = 0;
+			state = 1;
 		}
+
+		i++;
+
+		break;
 	}
+	case 1:
+	{
+		if (udp_server())
+		{
+			command_word_count = extract_command_data();
+			
+			if (display(command_word_count, command_buffer))
+			{
+				Serial.println("*display error*");
+			}
+		}
 
-	server.handleClient();
+		server.handleClient();
+		webSocket.loop();
 
-	webSocket.loop();
+		if (!eth.isLinked())
+		{
+			state = 0;
+		}
+	
+		break;
+	}
+	default:
+		break;
+	}
+		
+	delay(100);
 }
 
 int parse_network_config_file()
@@ -144,6 +187,7 @@ int parse_network_config_file()
 
   	if (!file)
 	{
+		Serial.println("Failed to open /network_config.txt for reading.");
     	return -1;
 	}
 	
@@ -152,7 +196,7 @@ int parse_network_config_file()
 	
 	strcpy(network_config_file_content, buffor);
 	
-	Serial.printf("\nNetwork configuration file:\n%s\n\n", buffor);
+	Serial.printf("\nNetwork configuration file:\n%s\n", buffor);
 	
 	IPAddress *network_config_ptr = (IPAddress*)&network_config;
 	const char *delimeter = "|";
@@ -174,16 +218,20 @@ int parse_network_config_file()
 
 		// IPAddress class method fromString() return 1 when string meets ipv4 address format
 		// and manages to assign value to given IPAddress object.
+		/*
 		if ((network_config_ptr + i)->fromString(buff)) 
 		{
 			Serial.printf("%d | %s\n", i, buff);
 		}
+		*/
+
+		(network_config_ptr + i)->fromString(buff);
 		
 		i++;
 
 	} while (working_ptr != NULL);
 	
-	Serial.println();
+	// Serial.println();
 	
 	file.close();
 
@@ -211,21 +259,9 @@ int udp_server()
 			udp_packet_buffer[packet_size] = '\0';
 		}
 
-		Serial.print("received packet of size ");
-		Serial.print(packet_size);
-		Serial.print(" from ");
 		IPAddress remote = udp.remoteIP();
-		for (int i=0; i < 4; i++) {
-			Serial.print(remote[i], DEC);
-			if (i < 3) {
-				Serial.print(".");
-			}
-		}
-		Serial.println();
-		Serial.print(udp_packet_buffer);
-		Serial.println("\n");
+		Serial.printf("UDP received packet from %s %s \n", remote.toString().c_str(), udp_packet_buffer);
 	}
-	delay(10);
 	
 	return packet_size;
 }
@@ -277,16 +313,15 @@ void handleRoot()
 	}
 	else
 	{
-		server.send(500, "text/plain", "500: Internal Server Error (Missing index.html)");
+		server.send(500, "text/plain", "500: Internal Server Error (Missing index.html)\n\n");
 		Serial.printf("*index.html not found in the filesystem*");
 	}
 }
 
 void handleNotFound()
 {
-	char message[] = "404 Not Found\n\n";
-	server.send(404, "text/plain", message);
-	Serial.printf("HTTP request for %s (404) from %s\n", server.uri(), server.client().remoteIP().toString().c_str());
+	Serial.printf("HTTP request for %s from %s\n", server.uri(), server.client().remoteIP().toString().c_str());
+	server.send(404, "text/plain", "404 Not Found\n\n");
 }
 
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length)
@@ -469,5 +504,5 @@ void print_network_config()
 	Serial.print("DNS_2: ");
 	Serial.println(eth.dnsIP(1));
 
-	Serial.println("#=============================#\n");
+	Serial.println("#=============================#");
 }
