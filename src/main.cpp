@@ -18,6 +18,7 @@ int extract_command_data();
 
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length);
 void send_current_network_config(uint8_t client_num);
+int check_config_format(uint8_t *config);
 
 void handleRoot();
 void handleNotFound();
@@ -138,9 +139,6 @@ int parse_network_config_file()
 	File file;
 	size_t bytesRead;
 	char buffor[64];
-
-	char **parsed_file_content;
-	size_t count;
 
 	file = LittleFS.open("/network_config.txt", "r");
 
@@ -317,6 +315,15 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 		case WStype_TEXT:
 		{
 			Serial.printf("WebSocket [%u] Received text: %s\n", client_num, payload);
+			
+			if (!check_config_format(payload))
+			{
+				Serial.println("*config from server: format valid*");
+			}
+			else
+			{
+				Serial.println("*config from server: format invalid*");
+			}
 		}
 
 		// For everything else: do nothing
@@ -390,7 +397,36 @@ void send_current_network_config(uint8_t client_num)
 
 int check_config_format(uint8_t *config)
 {
-	//
+	IPAddress ip_buffor;
+	const char *delimeter = "|";
+	char *buff;
+	char *working_ptr = (char *) config;
+
+	buff = strsep(&working_ptr, delimeter);
+	
+	if (buff == NULL || strcmp(buff, "0") && strcmp(buff, "1"))
+	{
+		return -1;
+	}
+
+	int i = 0;
+
+	do
+	{
+		buff = strsep(&working_ptr, delimeter);
+
+		// IPAddress class method fromString() return 1 when string meets ipv4 address format
+		// and manages to assign value to given IPAddress object.
+		if (!(ip_buffor.fromString(buff)) || strcmp(buff, ""))
+		{
+			return -1;
+		}
+		
+		i++;
+
+	} while (working_ptr != NULL && i < 4);
+	
+	return 0;
 }
 
 void print_network_config()
@@ -435,4 +471,3 @@ void print_network_config()
 
 	Serial.println("#=============================#\n");
 }
-

@@ -62,7 +62,7 @@
     <div id="connectionStatus" class="status">Connecting...</div>
 
     <script>
-        var url = "ws://" + window.location.hostname + ":1337/";
+        var url = "ws://" + window.location.hostname + ":" + window.location.port + "/";
         const socket = new WebSocket(url);
         const messagesDiv = document.getElementById('messages');
         const statusDiv = document.getElementById('connectionStatus');
