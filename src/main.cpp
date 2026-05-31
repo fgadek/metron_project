@@ -452,7 +452,7 @@ int check_config_format(uint8_t *config)
 
 		// IPAddress class method fromString() return 1 when string meets ipv4 address format
 		// and manages to assign value to given IPAddress object.
-		if (!(ip_buffor.fromString(buff)) || strcmp(buff, ""))
+		if (!(ip_buffor.fromString(buff)) || !strcmp(buff, ""))
 		{
 			return -1;
 		}
