@@ -19,13 +19,14 @@ int extract_command_data();
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length);
 void send_current_network_config(uint8_t client_num);
 int check_config_format(uint8_t *config);
+int write_to_config_file(uint8_t *config);
 
 void handleRoot();
 void handleNotFound();
 
 int parse_network_config_file();
-
 void print_network_config();
+void reboot_device();
 
 Wiznet5500lwIP eth(17);
 
@@ -72,43 +73,45 @@ void setup()
 	
 	if (parse_network_config_file())
 	{
-    	Serial.println("*an error has occured while reading network configuration file*");
 		while(true);
 	}
 	
 	if (!network_config.dhcp)
 	{
 		eth.config(network_config.ip, network_config.gateway, network_config.subnet, network_config.dns1, network_config.dns2);
-		print_network_config();
 	}
 	else
 	{
 		Serial.println("*DHCP enabled*");
-		Serial.println("Waiting for DHCP server response...");
 	}
 
 	eth.begin();
-
-	int i = 0;
-	while (!eth.connected())
+	
+	int p = 0;
+	while (!eth.isLinked())
 	{
-		if (i == 6)
+		if (!eth.isLinked() && !p)
 		{
-			Serial.println("*not connected*");
-			i = 0;
+			Serial.println("*disconnected*");
+			p = 1;
 		}
-		i++;
-		
 		delay(100);
 	}
-	
-	Serial.println("*connected to nerwork*");
-	state = 1;
 
 	if (network_config.dhcp)
 	{
-		print_network_config();
+		Serial.println("Waiting for DHCP server response...");
 	}
+	
+	while (!eth.connected())
+	{
+		delay(100);
+	}
+	
+	Serial.println("*connected to network*");
+	state = 1;
+
+	print_network_config();
 	
 	udp.begin(UDP_PORT);
 	
@@ -123,7 +126,7 @@ void setup()
 void loop()
 {
 	static int command_word_count;
-	static int i = 0;
+	static int lost_connection_state = 0;
 
 	switch (state)
 	{
@@ -131,20 +134,18 @@ void loop()
 	{
 		if (!eth.isLinked())
 		{
-			if (i == 8)
+			if (!lost_connection_state)
 			{
 				Serial.println("*connection lost*");
-				i = 0;
+				lost_connection_state = 1;
 			}
 		}
 		else
 		{
 			Serial.println("*connected to nerwork*");
-			i = 0;
+			lost_connection_state = 0;
 			state = 1;
 		}
-
-		i++;
 
 		break;
 	}
@@ -187,7 +188,7 @@ int parse_network_config_file()
 
   	if (!file)
 	{
-		Serial.println("Failed to open /network_config.txt for reading.");
+		Serial.println("*failed to open /network_config.txt for reading*");
     	return -1;
 	}
 	
@@ -354,6 +355,12 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 			if (!check_config_format(payload))
 			{
 				Serial.println("*config from server: format valid*");
+
+				if (!write_to_config_file(payload))
+				{
+					Serial.println("New network configuration written to config file!");
+					reboot_device();
+				}
 			}
 			else
 			{
@@ -388,7 +395,6 @@ void send_current_network_config(uint8_t client_num)
 		buffor[0] = '1';
 		buffor[1] = '|';
 		buffor[3] = '\0';
-		
 	}
 
 	if (strcmp(eth.localIP().toString().c_str(), "(IP unset)"))
@@ -432,10 +438,14 @@ void send_current_network_config(uint8_t client_num)
 
 int check_config_format(uint8_t *config)
 {
+	char buffor[64];
+	
+	strcpy(buffor, (char *)config);
+
 	IPAddress ip_buffor;
 	const char *delimeter = "|";
 	char *buff;
-	char *working_ptr = (char *) config;
+	char *working_ptr = buffor;
 
 	buff = strsep(&working_ptr, delimeter);
 	
@@ -460,6 +470,25 @@ int check_config_format(uint8_t *config)
 		i++;
 
 	} while (working_ptr != NULL && i < 4);
+	
+	return 0;
+}
+
+int write_to_config_file(uint8_t *config)
+{
+	char *buffor = (char *) config;
+
+	File file = LittleFS.open("/network_config.txt", "w"); 
+
+  	if (!file)
+	{
+		Serial.println("*failed to open /network_config.txt for writing*");
+    	return -1;
+  	}
+	
+	file.print(buffor);
+	
+	file.close();
 	
 	return 0;
 }
@@ -505,4 +534,21 @@ void print_network_config()
 	Serial.println(eth.dnsIP(1));
 
 	Serial.println("#=============================#");
+}
+
+void reboot_device()
+{
+	Serial.println("Rebooting device...");
+
+	/*
+	LittleFS.end();
+	udp.stop();
+	server.close();
+	webSocket.close();
+	eth.end();
+	Serial.end();
+	*/
+
+	delay(1000);
+	rp2040.reboot();
 }
