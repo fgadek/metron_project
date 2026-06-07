@@ -63,7 +63,7 @@ int state = 0;
 void setup()
 {
 	Serial.begin(9600);
-	while(!Serial);
+	//while(!Serial);
 	
 	if (!LittleFS.begin())
 	{
@@ -440,7 +440,7 @@ int check_config_format(uint8_t *config)
 {
 	char buffor[64];
 	
-	strcpy(buffor, (char *)config);
+	strcpy(buffor, (char *) config);
 
 	IPAddress ip_buffor;
 	const char *delimeter = "|";
@@ -449,7 +449,7 @@ int check_config_format(uint8_t *config)
 
 	buff = strsep(&working_ptr, delimeter);
 	
-	if (buff == NULL || strcmp(buff, "0") && strcmp(buff, "1"))
+	if (buff == NULL || !(!strcmp(buff, "0") || !strcmp(buff, "1")))
 	{
 		return -1;
 	}
@@ -462,14 +462,19 @@ int check_config_format(uint8_t *config)
 
 		// IPAddress class method fromString() return 1 when string meets ipv4 address format
 		// and manages to assign value to given IPAddress object.
-		if (!(ip_buffor.fromString(buff)) || !strcmp(buff, ""))
+		if (strcmp(buff, "") && !(ip_buffor.fromString(buff)))
 		{
 			return -1;
 		}
 		
 		i++;
 
-	} while (working_ptr != NULL && i < 4);
+	} while (working_ptr != NULL && i < 5);
+	
+	if (i != 4)
+	{
+		return -1;
+	}
 	
 	return 0;
 }
