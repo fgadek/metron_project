@@ -92,7 +92,11 @@ void setup()
 	int not_linked_on_init = 0;
 	while (!eth.isLinked())
 	{
-		Serial.println("*link down*");
+		if (!not_linked_on_init)
+		{
+			Serial.println("*link down*");
+		}
+		
 		not_linked_on_init = 1;
 		delay(1000);
 	}
@@ -130,6 +134,8 @@ void setup()
 void loop()
 {
 	static int command_word_count;
+	
+	static int link_down_message;
 
 	switch (state)
 	{
@@ -137,12 +143,18 @@ void loop()
 	{
 		if (!eth.isLinked())
 		{
-			Serial.println("*link down*");
+			if (!link_down_message)
+			{
+				Serial.println("*link down*");
+			}
+			link_down_message = 1;
+			
 		}
 		else
 		{
 			Serial.println("*link up*");
 			state = 1;
+			link_down_message = 0;
 		}
 		
 		delay(1000);
