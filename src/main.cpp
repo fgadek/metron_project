@@ -17,7 +17,7 @@ int udp_server();
 int extract_command_data();
 
 void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size_t length);
-void send_current_network_config(uint8_t client_num);
+int send_current_network_config(uint8_t client_num);
 int check_config_format(uint8_t *config);
 int write_to_config_file(uint8_t *config);
 
@@ -87,15 +87,19 @@ void setup()
 
 	eth.begin();
 	
-	int p = 0;
+	delay(500);
+	
+	int not_linked_on_init = 0;
 	while (!eth.isLinked())
 	{
-		if (!eth.isLinked() && !p)
-		{
-			Serial.println("*disconnected*");
-			p = 1;
-		}
-		delay(100);
+		Serial.println("*link down*");
+		not_linked_on_init = 1;
+		delay(1000);
+	}
+	
+	if (not_linked_on_init)
+	{
+		Serial.println("*link up*");
 	}
 
 	if (network_config.dhcp)
@@ -105,10 +109,10 @@ void setup()
 	
 	while (!eth.connected())
 	{
-		delay(100);
+		delay(200);
 	}
 	
-	Serial.println("*connected to network*");
+	Serial.println("*network configuration successfully applied*");
 	state = 1;
 
 	print_network_config();
@@ -126,7 +130,6 @@ void setup()
 void loop()
 {
 	static int command_word_count;
-	static int lost_connection_state = 0;
 
 	switch (state)
 	{
@@ -134,19 +137,16 @@ void loop()
 	{
 		if (!eth.isLinked())
 		{
-			if (!lost_connection_state)
-			{
-				Serial.println("*connection lost*");
-				lost_connection_state = 1;
-			}
+			Serial.println("*link down*");
 		}
 		else
 		{
-			Serial.println("*connected to nerwork*");
-			lost_connection_state = 0;
+			Serial.println("*link up*");
 			state = 1;
 		}
-
+		
+		delay(1000);
+		
 		break;
 	}
 	case 1:
@@ -163,19 +163,19 @@ void loop()
 
 		server.handleClient();
 		webSocket.loop();
+		
+		delay(200);
 
 		if (!eth.isLinked())
 		{
 			state = 0;
 		}
-	
+
 		break;
 	}
 	default:
 		break;
 	}
-		
-	delay(100);
 }
 
 int parse_network_config_file()
@@ -343,7 +343,11 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 			Serial.printf("WebSocket [%u] Connection from ", client_num);
 			Serial.println(ip.toString());
 			
-			send_current_network_config(client_num);
+			if (send_current_network_config(client_num))
+			{
+				Serial.println("Failed to send network configuration");
+			}
+			
 		}
 		break;
 
@@ -354,17 +358,19 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
 			
 			if (!check_config_format(payload))
 			{
-				Serial.println("*config from server: format valid*");
-
 				if (!write_to_config_file(payload))
 				{
 					Serial.println("New network configuration written to config file!");
 					reboot_device();
 				}
+				else
+				{
+					Serial.println("Config could not be written for some reason");
+				}
 			}
 			else
 			{
-				Serial.println("*config from server: format invalid*");
+				Serial.println("*invalid syntax for network configuration*");
 			}
 		}
 
@@ -380,60 +386,28 @@ void onWebSocketEvent(uint8_t client_num, WStype_t type, uint8_t * payload, size
   }
 }
 
-void send_current_network_config(uint8_t client_num)
+int send_current_network_config(uint8_t client_num)
 {
 	char buffor[64];
+	size_t bytesRead;
 
-	if (network_config.dhcp == 0)
-	{
-		buffor[0] = '0';
-		buffor[1] = '|';
-		buffor[3] = '\0';
-	}
-	else if (network_config.dhcp == 1)
-	{
-		buffor[0] = '1';
-		buffor[1] = '|';
-		buffor[3] = '\0';
-	}
+	File file = LittleFS.open("/network_config.txt", "r"); 
 
-	if (strcmp(eth.localIP().toString().c_str(), "(IP unset)"))
+  	if (!file)
 	{
-		strcat(buffor, eth.localIP().toString().c_str());
-	}
+		Serial.println("*failed to open /network_config.txt for reading*");
+    	return -1;
+  	}
 	
-	strcat(buffor, "|");
-
-	if (strcmp(eth.subnetMask().toString().c_str(), "(IP unset)"))
-	{
-		strcat(buffor, eth.subnetMask().toString().c_str());
-	}
+	bytesRead = file.readBytesUntil(EOF, buffor, sizeof(buffor) - 1);
+	buffor[bytesRead] = '\0';
 	
-	strcat(buffor, "|");
-
-	if (strcmp(eth.gatewayIP().toString().c_str(), "(IP unset)"))
-	{
-		strcat(buffor, eth.gatewayIP().toString().c_str());
-	}
-	
-	strcat(buffor, "|");
-
-	if (strcmp(eth.dnsIP(0).toString().c_str(), "(IP unset)"))
-	{
-		strcat(buffor, eth.dnsIP(0).toString().c_str());
-	}
-	
-	strcat(buffor, "|");
-
-	if (strcmp(eth.dnsIP(1).toString().c_str(), "(IP unset)"))
-	{
-		strcat(buffor, eth.dnsIP(1).toString().c_str());
-	}
-	
-	strcat(buffor, "|");
+	file.close();
 
 	webSocket.sendTXT(client_num, buffor, strlen(buffor));
 	Serial.printf("WebSocket [%u] text sent: %s\n", client_num, buffor);
+	
+	return 0;
 }
 
 int check_config_format(uint8_t *config)
@@ -471,7 +445,7 @@ int check_config_format(uint8_t *config)
 
 	} while (working_ptr != NULL && i < 5);
 	
-	if (i != 4)
+	if (i != 5)
 	{
 		return -1;
 	}
